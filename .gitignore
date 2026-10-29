@@ -1,0 +1,17 @@
+# Secretos y configuraciones locales
+*.key
+*.private
+*.conf
+!configs/*.conf.example
+.env
+.env.*
+secrets/
+private/
+*.pem
+
+# Entornos/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log

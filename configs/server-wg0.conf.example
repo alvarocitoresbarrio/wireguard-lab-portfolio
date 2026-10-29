@@ -1,0 +1,13 @@
+# PLANTILLA: /etc/wireguard/wg0.conf
+# No usar literalmente: sustituir los marcadores por las claves reales.
+# Nunca subir una clave privada real a GitHub.
+
+[Interface]
+Address = 10.10.10.1/24
+ListenPort = 51820
+PrivateKey = REEMPLAZAR_CON_CLAVE_PRIVADA_DEL_SERVIDOR
+
+[Peer]
+# Client01 — clave pública del cliente Windows
+PublicKey = REEMPLAZAR_CON_CLAVE_PUBLICA_DE_CLIENT01
+AllowedIPs = 10.10.10.2/32
