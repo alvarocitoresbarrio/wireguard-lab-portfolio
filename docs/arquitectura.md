@@ -1,23 +1,27 @@
-# Arquitectura y decisiones de diseño
+# Arquitectura del laboratorio
 
 ## Objetivo
+Establecer un túnel WireGuard entre Debian Server y Windows Client01 en VirtualBox, manteniendo separada la red de transporte `WG_LAN` de la red preexistente `Nexus_LAN`.
 
-Construir una VPN de laboratorio entre una VM Debian y una VM Windows, separando la red de transporte de las direcciones virtuales del túnel.
+## Componentes
+- Debian: servidor WireGuard, `wg0`, `10.10.10.1/24`, UDP `51820`.
+- Windows Client01: peer cliente, `10.10.10.2/24`.
+- `WG_LAN`: red interna de transporte, `192.168.50.0/24`.
+- `Nexus_LAN`: red existente de Active Directory, conservada sin cambios.
+- NAT VirtualBox: conectividad de salida/administración de Debian.
 
-## Redes
+## Decisión de diseño
+Se eligió un túnel dividido. En el cliente, `AllowedIPs = 10.10.10.1/32` dirige por WireGuard solo el tráfico destinado a la dirección del servidor dentro del túnel. No se enruta todo Internet ni se anuncia `Nexus_LAN`.
 
-- `Nexus_LAN`: red interna existente asociada al laboratorio de Active Directory. Se conserva sin modificar.
-- `WG_LAN`: red interna de VirtualBox que transporta paquetes WireGuard entre Debian y Windows.
-- `10.10.10.0/24`: red virtual del túnel WireGuard.
+## Direccionamiento observado
 
-## Por qué hay dos direcciones por equipo
+| Interfaz | Dirección |
+|---|---|
+| Debian `enp0s3` | `10.0.2.15/24` |
+| Debian `enp0s8` | `192.168.50.10/24` |
+| Debian `wg0` | `10.10.10.1/24` |
+| Windows `Nexus_LAN` | `192.168.10.101` |
+| Windows `WG_LAN` | `192.168.50.20/24` |
+| Windows WireGuard | `10.10.10.2/24` |
 
-La dirección `192.168.50.x` permite que el cliente alcance el endpoint WireGuard dentro de VirtualBox. La dirección `10.10.10.x` identifica al peer dentro del túnel y se utiliza para probar la conectividad protegida.
-
-## Alcance de la configuración
-
-El cliente solo enruta `10.10.10.1/32` por WireGuard. El servidor asocia la IP `10.10.10.2/32` a la clave pública del cliente. Esto limita el ejemplo a una comunicación entre peers y evita convertir accidentalmente el servidor en una puerta de enlace.
-
-## Por qué no se usa un endpoint público
-
-El objetivo de esta fase es aprender el protocolo en una red aislada. No se ha configurado redirección de puertos en un router ni se ha probado acceso desde Internet. Para un despliegue remoto se requeriría revisar direccionamiento público/CGNAT, firewall, endpoint, DNS dinámico si aplica y modelo de amenazas.
+Las direcciones asignadas por DHCP pueden cambiar.

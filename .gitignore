@@ -9,7 +9,7 @@ secrets/
 private/
 *.pem
 
-# Entornos/editor
+# Archivos de editor y sistema
 .DS_Store
 Thumbs.db
 .vscode/

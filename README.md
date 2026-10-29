@@ -1,217 +1,125 @@
+<div align="center">
+
 # Laboratorio WireGuard en VirtualBox
 
-Laboratorio doméstico de redes y ciberseguridad: despliegue de una VPN WireGuard entre un servidor Debian y un cliente Windows, con claves criptográficas, segmentación de red y pruebas de conectividad.
+**VPN de acceso limitado entre Debian Server y Windows Client**
 
-> **Estado:** laboratorio funcional en entorno aislado de VirtualBox.  
-> **Objetivo del repositorio:** documentar el diseño, la implementación, las pruebas y las decisiones de seguridad como proyecto de portfolio para puestos junior de sistemas, redes o ciberseguridad.
+[![WireGuard](https://img.shields.io/badge/VPN-WireGuard-88171A?logo=wireguard&logoColor=white)](https://www.wireguard.com/)
+[![Debian](https://img.shields.io/badge/Server-Debian-A81D33?logo=debian&logoColor=white)](https://www.debian.org/)
+[![Windows](https://img.shields.io/badge/Client-Windows-0078D4?logo=windows&logoColor=white)](https://www.microsoft.com/windows)
+[![VirtualBox](https://img.shields.io/badge/Lab-VirtualBox-183A61?logo=virtualbox&logoColor=white)](https://www.virtualbox.org/)
 
-## Qué demuestra este proyecto
+</div>
 
-- Instalación y configuración básica de WireGuard en Debian.
-- Creación y protección de claves públicas/privadas.
-- Configuración de peers y `AllowedIPs`.
-- Segmentación entre la red de transporte y la red virtual del túnel.
-- Conectividad y diagnóstico mediante `ip`, `wg`, `ping` y `systemctl`.
-- Inicio automático del servicio con systemd.
-- Documentación de riesgos, limitaciones y siguientes mejoras.
+## Resumen
+
+Despliegue y validación de un túnel WireGuard entre un servidor **Debian** y un cliente **Windows** dentro de Oracle VirtualBox. El laboratorio separa la red de transporte `WG_LAN` de la red existente de Active Directory `Nexus_LAN`.
+
+> **Estado:** túnel funcional en el laboratorio local.  
+> **Alcance:** túnel dividido (*split tunnel*) limitado a `10.10.10.1/32`. No es una VPN de túnel completo y no proporciona acceso automático a `Nexus_LAN`.
+
+## Competencias demostradas
+
+- Instalación y configuración de WireGuard en Debian.
+- Generación y protección de claves públicas/privadas.
+- Registro de peers y uso de `AllowedIPs`.
+- Segmentación de redes virtuales en VirtualBox.
+- Diagnóstico con `ip`, `wg`, `ping` y `systemctl`.
+- Inicio automático mediante `systemd`.
+- Documentación de pruebas, límites y mejoras.
+- Buenas prácticas para no publicar secretos.
 
 ## Arquitectura
 
-```mermaid
-flowchart TB
-    subgraph VBOX["VirtualBox — laboratorio local"]
-        subgraph NEXUS["Nexus_LAN — red existente de Active Directory"]
-            C1["Client01 / Windows\n192.168.10.101 (interfaz existente)"]
-        end
-        subgraph WGLAN["WG_LAN — red interna de transporte"]
-            DEBIAN["wireguard-debian\n192.168.50.10"]
-            C2["Client01 / Windows\n192.168.50.20"]
-        end
-        WG["Interfaz WireGuard wg0\n10.10.10.1/24"]
-        TUN["Túnel cifrado WireGuard\nUDP 51820"]
-        WGC["Interfaz WireGuard del cliente\n10.10.10.2/24"]
-        DEBIAN --- WG
-        C2 --- WGC
-        WG <--> TUN
-        TUN <--> WGC
-    end
-    DEBIAN -. "Adaptador 1: NAT para salida/administración" .- INTERNET["Red externa / Internet"]
-```
+![Diagrama de arquitectura](docs/images/arquitectura.svg)
 
-### Direccionamiento
+`WG_LAN` (`192.168.50.0/24`) es la red de transporte. WireGuard crea una red lógica cifrada (`10.10.10.0/24`) encima de ella. `Nexus_LAN` se conserva sin cambios.
+
+## Direccionamiento
 
 | Equipo/interfaz | Red | Dirección |
 |---|---|---|
-| Debian `enp0s3` | NAT VirtualBox | `10.0.2.15/24` (asignación observada en el laboratorio) |
+| Debian `enp0s3` | NAT VirtualBox | `10.0.2.15/24` (observada) |
 | Debian `enp0s8` | `WG_LAN` | `192.168.50.10/24` |
-| Debian `wg0` | Túnel WireGuard | `10.10.10.1/24` |
-| Client01 — interfaz existente | `Nexus_LAN` | `192.168.10.101` (según `ipconfig`) |
-| Client01 — segunda interfaz | `WG_LAN` | `192.168.50.20/24` |
-| Client01 — interfaz WireGuard | Túnel WireGuard | `10.10.10.2/24` |
+| Debian `wg0` | WireGuard | `10.10.10.1/24` |
+| Windows, interfaz existente | `Nexus_LAN` | `192.168.10.101` (observada) |
+| Windows, segunda interfaz | `WG_LAN` | `192.168.50.20/24` |
+| Windows, interfaz WireGuard | WireGuard | `10.10.10.2/24` |
 
-Las direcciones son específicas de este laboratorio y pueden cambiarse si se adapta la topología. `Nexus_LAN` se conserva para no alterar el laboratorio de Active Directory.
+Las direcciones observadas pueden cambiar en otros entornos.
 
 ## Cómo funciona
 
-1. Debian actúa como peer servidor y escucha en UDP `51820`.
-2. Windows ejecuta el cliente oficial WireGuard.
-3. Cada extremo tiene su propio par de claves. La clave privada no se comparte; la clave pública del peer se registra en el otro extremo.
-4. El cliente dirige únicamente el tráfico destinado a `10.10.10.1/32` por el túnel.
-5. Se valida el funcionamiento mediante el *handshake* y un `ping` a `10.10.10.1`.
-
-Este diseño es un **túnel de acceso limitado**, no una VPN de túnel completo. No enruta todo el tráfico de Internet ni da acceso automático a `Nexus_LAN`.
-
-## Requisitos
-
-- Host Windows con Oracle VirtualBox.
-- VM Debian Server con acceso de administración.
-- VM Windows (`Client01`) con permisos para instalar WireGuard.
-- Dos redes internas de VirtualBox: `Nexus_LAN` (existente) y `WG_LAN` (nueva).
-- Conectividad entre Debian y Client01 por `WG_LAN`.
-- Paquete `wireguard-tools` en Debian y aplicación oficial WireGuard en Windows.
-
-## Implementación resumida
-
-### 1. Redes de VirtualBox
-
-- Debian: Adaptador 1 NAT; Adaptador 2 `Red interna` llamada `WG_LAN`.
-- Client01: Adaptador 1 `Nexus_LAN`; Adaptador 2 `WG_LAN`.
-- Verificar que el nombre `WG_LAN` coincide exactamente en ambos adaptadores.
-
-### 2. Direcciones de `WG_LAN`
-
-En Debian, identificar interfaces con:
-
-```bash
-ip -br addr
-```
-
-En este laboratorio `enp0s8` es la interfaz de `WG_LAN`. Para una asignación temporal de prueba:
-
-```bash
-sudo ip link set enp0s8 up
-sudo ip addr add 192.168.50.10/24 dev enp0s8
-```
-
-En Client01, configurar la interfaz `WG_LAN` como `192.168.50.20`, prefijo `24`, sin puerta de enlace ni DNS en esa interfaz. La persistencia de la IP de Debian depende del gestor de red de la instalación y debe configurarse por separado.
-
-Comprobar conectividad de transporte:
-
-```bash
-ping -c 4 192.168.50.20
-```
-
-Desde Windows:
-
-```cmd
-ping 192.168.50.10
-```
-
-### 3. Instalar WireGuard y crear claves en Debian
-
-```bash
-sudo apt update
-sudo apt install wireguard
-sudo install -d -o root -g root -m 700 /etc/wireguard
-sudo sh -c 'umask 077; wg genkey > /etc/wireguard/server_private.key'
-sudo sh -c 'wg pubkey < /etc/wireguard/server_private.key > /etc/wireguard/server_public.key'
-```
-
-Mostrar **solo** la clave pública del servidor cuando se necesite registrarla en el cliente:
-
-```bash
-sudo cat /etc/wireguard/server_public.key
-```
-
-No publicar claves privadas, configuraciones reales con claves ni capturas que las muestren.
-
-### 4. Configuración de ejemplo del servidor
-
-Consultar [`configs/server-wg0.conf.example`](configs/server-wg0.conf.example). Sustituir los marcadores por las claves correspondientes. Proteger el archivo:
-
-```bash
-sudo chown root:root /etc/wireguard/wg0.conf
-sudo chmod 600 /etc/wireguard/wg0.conf
-```
-
-Activar y comprobar:
-
-```bash
-sudo wg-quick up wg0
-sudo wg show
-sudo systemctl enable wg-quick@wg0
-```
-
-Si la interfaz ya está activa, no volver a ejecutar `wg-quick up wg0`; para aplicar cambios hay que seguir un procedimiento controlado y verificar el estado del servicio.
-
-### 5. Configurar Windows
-
-Instalar la aplicación oficial desde [wireguard.com/install](https://www.wireguard.com/install/). Crear un túnel vacío, conservar la clave privada que genera la aplicación y usar como base [`configs/client-windows.conf.example`](configs/client-windows.conf.example).
-
-Registrar la clave pública del cliente en el bloque `[Peer]` del servidor, con `AllowedIPs = 10.10.10.2/32`. Activar el túnel y comprobar el estado en Debian:
-
-```bash
-sudo wg show
-```
-
-Una línea `latest handshake` reciente confirma que se completó el intercambio criptográfico. A continuación, desde Windows:
-
-```cmd
-ping 10.10.10.1
-```
+1. Windows alcanza el endpoint del servidor en `192.168.50.10:51820` mediante `WG_LAN`.
+2. Los peers se autentican mediante sus claves WireGuard.
+3. El cliente envía por el túnel únicamente el tráfico destinado a `10.10.10.1/32`.
+4. Debian recibe ese tráfico por `wg0` (`10.10.10.1/24`).
+5. El estado se valida mediante el handshake y pruebas ICMP.
 
 ## Resultados observados
 
-En la prueba realizada en el laboratorio:
+| Prueba | Resultado |
+|---|---|
+| Ping Windows → Debian `192.168.50.10` | 4/4 respuestas |
+| Interfaz `wg0` | Levantada correctamente |
+| Handshake WireGuard | Confirmado en `sudo wg show` |
+| Ping Windows → `10.10.10.1` por el túnel | 4/4 respuestas |
+| Inicio automático | `wg-quick@wg0` habilitado |
 
-- Debian mostraba `wg0` con `10.10.10.1/24` y puerto UDP `51820`.
-- El peer de Windows estaba registrado con `AllowedIPs = 10.10.10.2/32`.
-- `wg show` mostró `latest handshake` reciente y contadores de tráfico.
-- Windows recibió respuestas al hacer `ping 10.10.10.1` (4 enviados, 4 recibidos, 0 % perdidos).
+Son resultados de esta práctica, no una auditoría de seguridad completa.
 
-Estos resultados validan el túnel entre los dos peers. No demuestran acceso remoto desde Internet, enrutamiento a `Nexus_LAN` ni salida a Internet a través de WireGuard; esas funciones no forman parte de esta versión.
+## Evidencias visuales
 
-## Seguridad y límites
+Añade capturas reales a `docs/images/` para mostrar:
+- `wireguard-windows.png`: cliente WireGuard activo.
+- `wg-show.png`: handshake reciente y transferencia, sin secretos.
+- `ping-tunnel.png`: resultado de `ping 10.10.10.1`.
+- `virtualbox-networks.png`: adaptadores virtuales, si resulta útil.
 
-- No subir claves privadas, QR con configuración, archivos de configuración reales ni contraseñas a GitHub.
-- Los archivos de este repositorio son **plantillas** con marcadores, no configuraciones listas para copiar sin editar.
-- La IP de endpoint `192.168.50.10` solo es alcanzable dentro de la red de laboratorio; no es un endpoint público.
-- No se ha habilitado reenvío IP, NAT de salida ni `AllowedIPs = 0.0.0.0/0`.
-- No se ha expuesto el puerto UDP `51820` al router ni a Internet.
-- `WG_LAN` es una red interna de VirtualBox; por sí sola no proporciona acceso a Internet.
-- `AllowedIPs` no sustituye a las reglas de firewall ni a una política de mínimo privilegio.
-- Para producción se necesitarían revisión de firewall, actualizaciones, estrategia de recuperación de claves, monitorización y pruebas adicionales.
+No se incluyen capturas simuladas como si fueran pruebas reales. Revisa las imágenes antes de publicarlas y oculta claves, contraseñas y datos sensibles.
 
-## Próximas mejoras
-
-- [ ] Hacer persistente la IP estática de Debian según el gestor de red usado.
-- [ ] Validar un reinicio de Debian y comprobar el inicio automático de `wg0`.
-- [ ] Añadir un segundo peer (PC anfitrión) con claves independientes.
-- [ ] Documentar pruebas de firewall y alcance de `AllowedIPs`.
-- [ ] Añadir un diagrama de flujo de paquetes y una matriz de pruebas.
-- [ ] Explorar un escenario separado de acceso a una subred, con reglas explícitas.
-- [ ] Si se crea una prueba de túnel completo, usar una red/VM aislada y documentar reenvío, NAT, DNS e IPv6 por separado.
-
-## Estructura del repositorio
+## Estructura
 
 ```text
-wireguard-lab-portfolio/
 ├── README.md
 ├── LICENSE
-├── .gitignore
 ├── SECURITY.md
+├── .gitignore
 ├── configs/
 │   ├── server-wg0.conf.example
 │   └── client-windows.conf.example
 └── docs/
     ├── arquitectura.md
     ├── validacion.md
-    └── mejoras-futuras.md
+    ├── mejoras-futuras.md
+    └── images/
+        └── arquitectura.svg
 ```
 
-## Presentación en el CV
+## Reproducir el laboratorio
 
-**Laboratorio doméstico — WireGuard VPN con Debian y Windows (VirtualBox)**  
-Diseñé y documenté un laboratorio segmentado con Debian como servidor WireGuard y Windows como cliente. Configuré claves criptográficas, peers, direccionamiento IP, arranque automático con systemd y validé el túnel mediante handshake y pruebas ICMP. Documenté límites de seguridad y mejoras futuras.
+Consulta [`docs/arquitectura.md`](docs/arquitectura.md), las plantillas en [`configs/`](configs/) y las pruebas en [`docs/validacion.md`](docs/validacion.md). Las plantillas contienen marcadores que debes sustituir por los valores de tu entorno.
 
-Adapta esta descripción a lo que hayas implementado y puedas explicar en una entrevista.
+## Seguridad y límites
+
+- Nunca publiques claves privadas ni configuraciones reales.
+- El endpoint `192.168.50.10:51820` solo es accesible dentro del laboratorio local tal como está montado.
+- No se ha configurado redirección de puertos en el router ni un endpoint público.
+- No se ha configurado enrutamiento hacia `Nexus_LAN`.
+- `AllowedIPs = 10.10.10.1/32` limita el tráfico enviado por el cliente a esa dirección.
+
+Consulta [`SECURITY.md`](SECURITY.md).
+
+## Mejoras futuras
+
+- Añadir capturas reales de las pruebas.
+- Probar persistencia tras reiniciar las máquinas.
+- Documentar reglas de firewall explícitas.
+- Explorar acceso controlado a una subred de pruebas.
+- Automatizar comprobaciones del estado del túnel.
+
+## Descripción para el CV
+
+> Desplegué y documenté una VPN WireGuard entre Debian Server y Windows en VirtualBox, con redes virtuales segmentadas, autenticación mediante claves, servicio persistente con systemd y validación de conectividad mediante handshake y pruebas ICMP.
+
+*Proyecto de laboratorio personal con fines educativos y de portfolio.*
